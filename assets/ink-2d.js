@@ -1,6 +1,7 @@
 /* CPU edition of the ink field. The page supplies the only animation clock. */
-(() => {
+function installRiver2D(){
   'use strict';
+  const newSurface=()=>typeof document==='undefined'?new OffscreenCanvas(1,1):document.createElement('canvas');
   const TAU=Math.PI*2;
   const clamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x));
   const mix=(a,b,t)=>a+(b-a)*t;
@@ -55,7 +56,7 @@
     gradient.addColorStop(1,skyAt(end,stops));return gradient;
   }
   function returningPaper(width,height){
-    const c=document.createElement('canvas');c.width=Math.min(400,Math.ceil(width));c.height=clamp(Math.ceil(height),2,520);
+    const c=newSurface();c.width=Math.min(400,Math.ceil(width));c.height=clamp(Math.ceil(height),2,520);
     const b=c.getContext('2d'),pixels=b.createImageData(c.width,c.height),umber=lab([121,94,69]);
     const ramp=Array.from({length:1025},(_,i)=>{
       const t=i/1024,color=t<.43?shade(labs[1],umber,t/.43):shade(umber,labs[2],(t-.43)/.57);
@@ -115,7 +116,7 @@
     let left=Infinity,top=Infinity,right=-Infinity,bottom=-Infinity;
     for(let i=0;i<points.length;i+=2){left=Math.min(left,points[i]);right=Math.max(right,points[i]);top=Math.min(top,points[i+1]);bottom=Math.max(bottom,points[i+1]);}
     const width=Math.max(1,right-left+1),height=Math.max(1,bottom-top+1);
-    const raster=document.createElement('canvas'),scale=2;
+    const raster=newSurface(),scale=2;
     raster.width=Math.ceil((width+6)*scale);raster.height=Math.ceil((height+6)*scale);
     const brush=raster.getContext('2d');brush.scale(scale,scale);
     const step=clamp(Math.sqrt(width*height*.19/(points.length/2)),.65,2.3);
@@ -134,7 +135,7 @@
     // A temporarily empty font mask must still produce a readable night inscription.
     const r=model.finale||[0,0,model.w,Math.max(100,model.h*.27)];
     const width=Math.max(1,Math.ceil(r[2])),height=Math.max(1,Math.ceil(r[3]));
-    const c=document.createElement('canvas');c.width=width;c.height=height;
+    const c=newSurface();c.width=width;c.height=height;
     const b=c.getContext('2d',{willReadFrequently:true});
     b.font='italic '+(model.small?clamp(width*.105,36,46):clamp(width*.046,36,64))+'px Cormorant,Georgia,serif';
     b.textAlign='center';b.fillStyle='white';
@@ -147,13 +148,13 @@
     for(let y=0;y<height;y++)for(let x=0;x<width;x++)if(p[(y*width+x)*4+3]>76)a.push(x+.5,y+.5);
     return new Float32Array(a);
   }
-  window.River2D=function River2D(canvas,initial,regional=false){
+  globalThis.River2D=function River2D(canvas,initial,regional=false){
     // Keep fallback surfaces on the CPU so an emulated GPU never has to rasterize these paths.
     const backing={alpha:false,willReadFrequently:true};
     let ctx=canvas.getContext('2d',backing);
     if(!ctx)return null;
-    const trails=document.createElement('canvas'),tc=trails.getContext('2d',{willReadFrequently:true});
-    const ground=document.createElement('canvas'),gc=ground.getContext('2d',backing);
+    const trails=newSurface(),tc=trails.getContext('2d',{willReadFrequently:true});
+    const ground=newSurface(),gc=ground.getContext('2d',backing);
     const guardPaints=new Map(),guardPad=23;
     const stats={backend:'Canvas2D',particles:0,dpr:1,trailScale:1};
     let M,w,h,dpr,small,atlas,glyphs,spine,field,cols,rows,px,py,weight,count,nightTop,nightBottom;
@@ -217,7 +218,7 @@
         const coreW=Math.ceil(r[2])+2,coreH=Math.ceil(r[3])+2,W=coreW+2*guardPad,H=coreH+2*guardPad;
         let cache=guardPaints.get(index);
         if(!cache||cache.mask.width!==W||cache.mask.height!==H){
-          const mask=document.createElement('canvas'),patch=document.createElement('canvas');
+          const mask=newSurface(),patch=newSurface();
           mask.width=patch.width=W;mask.height=patch.height=H;
           const m=mask.getContext('2d');let previous=0;
           for(let i=0;i<=12;i++){
@@ -622,4 +623,5 @@
     layout(initial);
     return {layout,draw,paintRegion,dispose,stats};
   };
-})();
+}
+installRiver2D();

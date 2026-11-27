@@ -1,8 +1,8 @@
-@font-face{font-family:Cormorant;src:url(fonts/cormorant.ttf);font-weight:400;font-display:swap}
-@font-face{font-family:Cormorant;src:url(fonts/cormorant-light.ttf);font-weight:300;font-display:swap}
-@font-face{font-family:Cormorant;src:url(fonts/cormorant-italic.ttf);font-weight:400;font-style:italic;font-display:swap}
-@font-face{font-family:Cormorant;src:url(fonts/cormorant-italic-light.ttf);font-weight:300;font-style:italic;font-display:swap}
-@font-face{font-family:Noto Serif;src:url(fonts/noto-serif.ttf);font-weight:400;font-display:swap}
+@font-face{font-family:Cormorant;src:url(fonts/cormorant.woff2) format("woff2"),url(fonts/cormorant.ttf) format("truetype");font-weight:400;font-display:swap}
+@font-face{font-family:Cormorant;src:url(fonts/cormorant-light.woff2) format("woff2"),url(fonts/cormorant-light.ttf) format("truetype");font-weight:300;font-display:swap}
+@font-face{font-family:Cormorant;src:url(fonts/cormorant-italic.woff2) format("woff2"),url(fonts/cormorant-italic.ttf) format("truetype");font-weight:400;font-style:italic;font-display:swap}
+@font-face{font-family:Cormorant;src:url(fonts/cormorant-italic-light.woff2) format("woff2"),url(fonts/cormorant-italic-light.ttf) format("truetype");font-weight:300;font-style:italic;font-display:swap}
+@font-face{font-family:Noto Serif;src:url(fonts/noto-serif.woff2) format("woff2"),url(fonts/noto-serif.ttf) format("truetype");font-weight:400;font-display:swap}
 :root{--mist:#f1ece2;--palm:#e4d6bc;--afternoon:#ece2d0;--earth:#2b2622;--night:#121a27;--yamuna:#1c2636;--earth-text:#e9e1d2;--ganga:#93a8a2;--ganga-night:#aeb6b4;--silt:#55625f;--gold:#7a5a1f;--gold-light:#c9a45c;--gold-hi:#e6c988;--ink:var(--yamuna);--serif:Cormorant,Garamond,Georgia,serif;--ease:cubic-bezier(.22,.61,.36,1);--edge:clamp(24px,7vw,150px)}
 *{box-sizing:border-box}
 html{scroll-padding-top:2rem}
@@ -242,8 +242,8 @@ body:after{opacity:.034}
 }
 .dawn-art{position:absolute;inset:0;pointer-events:none}
 
-html:not(.simulated) .dawn-art{background:url(dawn-engraving.svg) center/100% 100% no-repeat}
-html:not(.simulated) .night-water{background:url(night-engraving.svg) center/100% 100%}
+html:not(.simulated) .dawn-art{background:url(dawn-wide.webp) center/100% 100% no-repeat}
+html.ink-fallback .night-water{background:url(night-engraving.svg) center/100% 100%}
 #flow{opacity:1;inset:0;width:100%;height:100%;pointer-events:none}
 html:not(.simulated) #flow{visibility:hidden}
 .old-impression{position:fixed;inset:0;z-index:0;pointer-events:none}
@@ -291,7 +291,7 @@ body{position:relative}
 .river-plane #flow{position:absolute;inset:0 auto auto 0;will-change:transform}
 .native-water #flow{display:none}
 .native-water .dawn-art{background:url(dawn-wide.webp) center/100% 100% no-repeat}
-@media(max-width:760px){.native-water .dawn-art{background-image:url(dawn-mobile.webp)}}
+@media(max-width:760px){html:not(.simulated) .dawn-art,.native-water .dawn-art{background-image:url(dawn-mobile.webp)}}
 
 .native-water .night-water,.native-water .earth-pin{isolation:isolate}
 .river-region,.river-spine{position:absolute;pointer-events:none}

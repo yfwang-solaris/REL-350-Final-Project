@@ -315,8 +315,8 @@
       installRenderer(m);
       for(const quote of m.quotes){quote.el.replaceChildren(quote.fragments);delete quote.fragments;}
       model=m;readyCount++;lastDom=0;
-      priorStaticKey='';inputY=scrollY;last=0;root.classList.add('simulated');wake();
-    }catch(error){errorMessage=String(error);console.error('River layout:',error);if(!model)root.classList.remove('live','simulated');}
+      priorStaticKey='';inputY=scrollY;last=0;root.classList.remove('ink-fallback');root.classList.add('simulated');wake();
+    }catch(error){errorMessage=String(error);console.error('River layout:',error);if(!model){root.classList.remove('live','simulated');root.classList.add('ink-fallback');}}
     finally{building=false;if(deferred){deferred=false;queueLayout();}}
   }
   addEventListener('scroll',()=>{inputY=scrollY;lastGesture=performance.now();wake();},{passive:true});

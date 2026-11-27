@@ -106,30 +106,38 @@ window.RiverLayers=function(plane,initial){
   // Prepaint the reversible night sequence at this page's measured glyph positions.
   // Adjacent samples crossfade continuously on the browser's native scroll timeline.
   function prepareNight(frame){
-    if(film||!window.ScrollTimeline||frame.static)return;
+    if(film||!window.ScrollTimeline||!window.Worker||!window.OffscreenCanvas||frame.static)return;
     const m=model,stage=m.finale,visibleHeight=innerHeight,source=document.scrollingElement;
     const total=source.scrollHeight-visibleHeight;
     if(total<=0)return;
-    const state={cancel:false,nodes:[],url:null,timer:0,ready:false};
+    const state={cancel:false,nodes:[],url:null,worker:null,ready:false};
     film=state;
-    const tile=document.createElement('canvas'),atlas=document.createElement('canvas');
     const count=31,scale=Math.min(1.12,900/stage[2],210/stage[3]);
-    tile.width=Math.ceil(stage[2]*scale);tile.height=Math.ceil(stage[3]*scale);
-    const cols=Math.max(1,Math.min(6,Math.floor(4096/tile.width))),rows=Math.ceil(count/cols);
-    atlas.width=tile.width*cols;atlas.height=tile.height*rows;
-    const pen=atlas.getContext('2d',{willReadFrequently:true}),r=[0,0,stage[2],stage[3]];
-    const blank=[0,-1e6,0,0],still={...frame,y:stage[1],final:r,t:3,section:6,dt:0,nightHeld:0,
+    const width=Math.ceil(stage[2]*scale),height=Math.ceil(stage[3]*scale);
+    const cols=Math.max(1,Math.min(6,Math.floor(4096/width))),rows=Math.ceil(count/cols);
+    const r=[0,0,stage[2],stage[3]],blank=[0,-1e6,0,0];
+    const still={...frame,y:stage[1],final:r,t:3,section:6,dt:0,nightHeld:0,
       hero:blank,ford2:blank,ford3:blank,ford4:blank,surface:blank,ford5:blank,band:blank,term:blank,timeBed:blank,
       impulses:[],emissions:[],plucks:[],termGuards:[],dissolveAges:[]};
-    let i=0;
-    function next(){
-      if(state.cancel)return;
-      still.finalP=.60*i/(count-1);
-      brush.paintRegion(tile,still,'final',r);
-      pen.drawImage(tile,(i%cols)*tile.width,Math.floor(i/cols)*tile.height);
-      i++;
-      if(i<count){schedule();return;}
-      atlas.toBlob(async blob=>{
+    async function paintSequence(event){
+      const {model,frame,width,height,rows,cols,count}=event.data;
+      const tile=new OffscreenCanvas(width,height),atlas=new OffscreenCanvas(width*cols,height*rows);
+      const pen=atlas.getContext('2d',{willReadFrequently:true}),artist=River2D(new OffscreenCanvas(1,1),model,true);
+      for(let k=0;k<count;k++){
+        frame.finalP=.60*k/(count-1);
+        artist.paintRegion(tile,frame,'final',frame.final);
+        pen.drawImage(tile,(k%cols)*width,Math.floor(k/cols)*height);
+      }
+      self.postMessage(await atlas.convertToBlob({type:'image/png'}));
+    }
+    const script='('+installRiver2D.toString()+')();self.onmessage='+paintSequence.toString();
+    const url=URL.createObjectURL(new Blob([script],{type:'text/javascript'}));
+    try{
+      state.worker=new Worker(url);
+    }catch{return;}finally{URL.revokeObjectURL(url);}
+    state.worker.onerror=()=>state.worker.terminate();
+    state.worker.onmessage=async ({data:blob})=>{
+        state.worker.terminate();
         if(!blob||state.cancel)return;
         state.url=URL.createObjectURL(blob);
         const img=new Image();img.src=state.url;
@@ -169,22 +177,22 @@ window.RiverLayers=function(plane,initial){
         night.append(holder);state.nodes.push(holder);
         const last=regions.find(layer=>layer.key==='final');
         last.canvas.style.visibility='hidden';state.ready=true;stats.nightCached=true;
-      },'image/png');
-    }
-    function schedule(){state.timer=window.requestIdleCallback?requestIdleCallback(next,{timeout:180}):setTimeout(next,32);}
-    schedule();
+    };
+    const geometry={w:m.w,h:m.h,docH:m.docH,small:m.small,finale:stage,finalGlyphBounds:m.finalGlyphBounds,
+      glyphs:{final:m.glyphs.final}};
+    state.worker.postMessage({model:geometry,frame:still,width,height,rows,cols,count});
   }
   function clearFilm(){
     if(!film)return;
     film.cancel=true;
-    if(window.cancelIdleCallback)cancelIdleCallback(film.timer);else clearTimeout(film.timer);
+    film.worker?.terminate();
     for(const el of film.nodes)el.remove();
     if(film.url)URL.revokeObjectURL(film.url);
     film=null;stats.nightCached=false;
   }
 
   function draw(f){
-    if(f.t>2||f.y>model.fords[2][1]-innerHeight)prepareNight(f);
+    if(f.y>model.fords[2][1]-innerHeight)prepareNight(f);
     const moving=f.y!==lastScroll;lastScroll=f.y;
     if(f.hero[1]+f.hero[3]>0&&f.hero[1]<innerHeight&&(f.static||f.t-lastGlint>.05)){
       const u=Math.max(0,Math.min(1,(f.light[0]-f.hero[0])/f.hero[2])),cy=center(u);
