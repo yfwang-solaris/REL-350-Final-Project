@@ -240,8 +240,9 @@
   }
   function compose(now){
     raf=0;if(!model||document.hidden)return;
-    const dt=last?Math.min(.05,Math.max(0,(now-last)*.001)):0;last=now;
-    if(!reduced.matches)t+=dt;
+    const elapsed=last?Math.max(0,(now-last)*.001):0;last=now;
+    const dt=Math.min(.06,elapsed);
+    if(!reduced.matches)t+=elapsed;
     const previousY=y;y=inputY;const delta=y-previousY;
     scrollSpeed=mix(scrollSpeed,clamp(Math.abs(delta)/(Math.max(dt,.001)*950),0,2),1-Math.exp(-dt*8));
     if(delta&&!reduced.matches){
@@ -252,7 +253,7 @@
       const edge=model.surface[1]+model.surface[3]*.67-screenHeight*.62;
       if((previousY-edge)*(y-edge)<=0)impulse(model.w*.75,edge+screenHeight*.62,0,-1,Math.min(model.w*.28,230),1,1);
     }
-    const f=makeFrame(dt);currentFrame=f;updateText(f,delta);
+    const f=makeFrame(dt);f.elapsed=elapsed;currentFrame=f;updateText(f,delta);
     const key=[Math.round(y),readyCount,reduced.matches].join('/');
     if(!reduced.matches||key!==priorStaticKey){
       f.settle=reduced.matches?18:0;

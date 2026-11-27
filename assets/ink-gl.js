@@ -195,8 +195,8 @@
   const filaments=header+globals+paletteMath+`
     uniform sampler2D stateTex,obstacleTex,spineTex,glyphTex;
     uniform ivec2 glyphSets[6];
-    uniform int stateWidth,particleStride;
-    uniform float pixelRatio;
+    uniform int stateWidth,particleStride,glyphSupplement;
+    uniform float pixelRatio,inkCoverage;
     out vec2 local;out vec2 screenPoint;flat out vec4 ink;flat out vec3 stroke;
     vec2 glyphPoint(int group,float sampleId){
       ivec2 record=glyphSets[group];
@@ -221,7 +221,12 @@
     }
     void main(){
       uint id=uint(gl_InstanceID*particleStride);
-      vec4 state=texelFetch(stateTex,ivec2(int(id)%stateWidth,int(id)/stateWidth),0);
+      // Additional letter samples need no simulated position. Their motion uses the same
+      // scroll phase and glyph atlas as the ordinary gold particles.
+      bool letterOnly=glyphSupplement!=0;
+      vec4 state=vec4(0.);
+      if(letterOnly)id=100u*(uint(glyphSupplement)+id/9u)+id%9u;
+      else state=texelFetch(stateTex,ivec2(int(id)%stateWidth,int(id)/stateWidth),0);
       uint block=id/100u,slot=id%100u;
       float cohort=(float(slot)+hashU(block+29u))*.01,a=hashU(id+371u),b=hashU(id+983u),c=hashU(id+5011u),j=hashU(id+7867u);
       float u=state.x*1.1-.05;
@@ -233,7 +238,7 @@
       vec3 gold=night||underground?vec3(.88,.755,.48):vec3(.51,.38,.17);
       vec3 pigment=night?mix(nightDark,nightLight,a):(underground?mix(vec3(.36,.31,.27),vec3(.55,.49,.41),a):mix(dayDark,dayLight,a));
       float alpha=(.022+.038*b)*(.43+.57*a);
-      bool isGold=cohort<phase.x;
+      bool isGold=letterOnly||cohort<phase.x;
       bool literal=false,assigned=false;
       int material=0; // ambient, dawn bank, night bank, silt, subterranean gold, strings/tributaries
       // Four independent packets of 56 physical filaments, each with an actual
@@ -415,6 +420,8 @@
           pigment=gold;len=1.6+2.8*b;width=.53+.36*c;alpha=(.21+.25*b)*(1.-smoothstep(.30,2.2,event.z));
         }
       }
+      // Preserve the weight of the river when software adapters draw fewer samples.
+      if(inkCoverage>1.&&!literal){len*=sqrt(inkCoverage);alpha=1.-pow(1.-clamp(alpha,0.,1.),inkCoverage);}
       if(material==2&&view.x<=760.&&finalInk.y>finalInk.x){
         // Route the complete ribbon, including the outermost fibers, pointer
         // wake, antialias coverage and both ends of each pen cut, outside the
@@ -502,10 +509,19 @@
   window.RiverGL=(canvas,initial)=>{
     const gl=canvas.getContext('webgl2',{alpha:false,antialias:false,depth:false,stencil:false,premultipliedAlpha:true,preserveDrawingBuffer:false,powerPreference:'high-performance'});
     if(!gl||!gl.getExtension('EXT_color_buffer_float'))return null;
+    const info=gl.getExtension('WEBGL_debug_renderer_info');
+    const rendererName=gl.getParameter(info?info.UNMASKED_RENDERER_WEBGL:gl.RENDERER);
+    let leanInk=/swiftshader|llvmpipe|softpipe|software rasterizer|microsoft basic render/i.test(rendererName);
     const programs=[],textures=[],buffers=[],framebuffers=[];
     let vao,ubo,model,disposed=false;
+    const pendingFrames=[];
+    function clearFences(){
+      for(const fence of pendingFrames)gl.deleteSync(fence);
+      pendingFrames.length=0;
+    }
     function dispose(){
       if(disposed)return;disposed=true;
+      clearFences();
       for(const p of programs)gl.deleteProgram(p);
       for(const t of textures)gl.deleteTexture(t);
       for(const f of framebuffers)gl.deleteFramebuffer(f);
@@ -553,6 +569,8 @@
         ranges:gl.getUniformLocation(deposit,'glyphSets[0]'),
         stateWidth:gl.getUniformLocation(deposit,'stateWidth'),
         stride:gl.getUniformLocation(deposit,'particleStride'),
+        coverage:gl.getUniformLocation(deposit,'inkCoverage'),
+        supplement:gl.getUniformLocation(deposit,'glyphSupplement'),
         density:gl.getUniformLocation(deposit,'pixelRatio'),
         retain:gl.getUniformLocation(fadePaper,'retention'),
         fadeUV:gl.getUniformLocation(fadePaper,'historyUV'),
@@ -578,8 +596,7 @@
       gl.bindFramebuffer(gl.FRAMEBUFFER,simFbo[0]);
       if(gl.checkFramebufferStatus(gl.FRAMEBUFFER)!==gl.FRAMEBUFFER_COMPLETE)throw new Error('Floating-point state framebuffer is unavailable.');
       gl.useProgram(deposit);gl.uniform1i(loc.stateWidth,N);
-      const info=gl.getExtension('WEBGL_debug_renderer_info');
-      const stats={backend:'webgl2',renderer:info?gl.getParameter(info.UNMASKED_RENDERER_WEBGL):gl.getParameter(gl.RENDERER),particles:0,trailScale:.62,dpr:1,frames:0};
+      const stats={backend:'webgl2',renderer:rendererName,particles:0,trailScale:.62,dpr:1,frames:0};
       let stateIndex=0,trailIndex=0,trailW=0,trailH=0,capacityW=0,capacityH=0,lastY=NaN;
       let lastStaticSection=-1,wallTime=0,finalTop=0,finalBottom=0;
       let minCount=40000,maxCount=120000,windowTime=0,windowFrames=0,fastWindows=0,warmFrames=0;
@@ -589,20 +606,25 @@
         trailW=w;trailH=h;
         lastY=NaN;
       }
+      let densityLimit=leanInk?.68:2;
+      function sizeSurface(){
+        const dpr=Math.min(densityLimit,model.dpr||devicePixelRatio||1,Math.sqrt(6400000/(model.w*model.h)));
+        const w=Math.max(1,Math.round(model.w*dpr)),h=Math.max(1,Math.round(model.h*dpr));
+        if(canvas.width!==w)canvas.width=w;if(canvas.height!==h)canvas.height=h;
+        stats.dpr=dpr;
+      }
       function layout(m){
-        model=m;const dpr=Math.min(2,Math.max(.5,m.dpr||devicePixelRatio||1));
+        clearFences();
+        model=m;sizeSurface();
         const lines=m.finalGlyphBounds||[];
         finalTop=lines.length?Math.min(...lines.map(box=>box[1])):0;
         finalBottom=lines.length?Math.max(...lines.map(box=>box[1]+box[3])):0;
-        const w=Math.max(1,Math.round(m.w*dpr)),h=Math.max(1,Math.round(m.h*dpr));
-        if(canvas.width!==w)canvas.width=w;if(canvas.height!==h)canvas.height=h;
-        stats.dpr=dpr;
-        const mobile=Boolean(m.small),min=mobile?15000:40000,max=mobile?30000:120000;
-        if(min!==minCount||!stats.particles){stats.particles=mobile?21000:56000;stats.trailScale=mobile?.56:.62;}
+        const mobile=Boolean(m.small),min=leanInk?4800:mobile?15000:40000,max=leanInk?12000:mobile?30000:120000;
+        if(min!==minCount||!stats.particles){stats.particles=leanInk?8000:mobile?21000:56000;stats.trailScale=leanInk?.48:mobile?.56:.62;}
         minCount=min;maxCount=max;
         // The trail buffers have spare capacity. Quality changes move the viewport
         // inside them without allocating GPU memory during a gesture.
-        const maxW=Math.max(1,Math.ceil(w*.78)),maxH=Math.max(1,Math.ceil(h*.78));
+        const maxW=Math.max(1,Math.ceil(canvas.width*.78)),maxH=Math.max(1,Math.ceil(canvas.height*.78));
         if(maxW!==capacityW||maxH!==capacityH){
           capacityW=maxW;capacityH=maxH;
           for(const t of history)storage(t,gl.RGBA16F,capacityW,capacityH,gl.RGBA,gl.HALF_FLOAT,null);
@@ -627,10 +649,10 @@
       }
       const empty=[0,-1e6,0,0],emptySource=[0,0,0,0];
       const areaNames=['hero','ford2','ford3','ford4','surface','ford5','final','band','term'];
-      function fillFrame(f){
+      function fillFrame(f,dt){
         const data=frameData;data.fill(0);
         data.set([model.w,model.h,model.docH,stats.dpr],0);
-        data.set([f.static?.75:f.t,f.static?1/48:Math.max(0,Math.min(.06,f.dt)),f.y,f.speed||0],4);
+        data.set([f.static?.75:f.t,f.static?1/48:dt,f.y,f.speed||0],4);
         data.set([f.gold,f.finalP,f.earthP,f.mergeP],8);
         data.set([f.sentencePhase,f.vacP,f.section,f.static?1:0],12);
         data.set([f.light?.[0]??model.w*.7,f.light?.[1]??model.h*.65,f.noiseSeed??17,Number.isFinite(lastY)?lastY:f.y],16);
@@ -652,10 +674,17 @@
         gl.bindBuffer(gl.UNIFORM_BUFFER,ubo);gl.bufferSubData(gl.UNIFORM_BUFFER,0,data);
       }
       function adapt(dt){
-        if(dt<=0||dt>1||warmFrames++<12)return;
+        if(dt<=0||warmFrames++<4)return;
         windowTime+=dt;windowFrames++;if(windowTime<1)return;
         const average=windowTime/windowFrames,slow=model.small?1/51:1/58;
         if(average>slow){
+          if(!leanInk&&average>.085&&stats.particles===minCount&&densityLimit<=1){
+            leanInk=true;minCount=4800;maxCount=12000;stats.particles=8000;
+            densityLimit=.68;sizeSurface();
+          }
+          if(average>.029&&stats.particles===minCount&&densityLimit>.75){
+            densityLimit=Math.max(.75,Math.min(stats.dpr,densityLimit)*.8);sizeSurface();
+          }
           const next=Math.max(minCount,Math.floor(stats.particles*.84));
           stats.particles=next;stats.trailScale=Math.max(.34,stats.trailScale-.055);fastWindows=0;
         }else if(average<1/66&&++fastWindows>=4){
@@ -672,16 +701,29 @@
       }
       function inkPass(stride,dpr){
         gl.useProgram(deposit);bind(0,state[stateIndex]);
+        gl.uniform1i(loc.supplement,0);
+        gl.uniform1f(loc.coverage,leanInk?Math.min(4,Math.sqrt((model.small?21000:56000)/stats.particles)):1);
         gl.uniform1i(loc.stride,stride);gl.uniform1f(loc.density,dpr);
         gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
         gl.drawArraysInstanced(gl.TRIANGLE_STRIP,0,4,Math.floor(stats.particles/stride));gl.disable(gl.BLEND);
       }
       function draw(f){
         if(disposed||gl.isContextLost())return;
+        // Do not queue stale scroll positions behind a busy GPU. The next free frame uses the current position.
+        if(!f.static&&f.dt>0){
+          while(pendingFrames.length){
+            const status=gl.clientWaitSync(pendingFrames[0],0,0);
+            if(status===gl.TIMEOUT_EXPIRED)break;
+            gl.deleteSync(pendingFrames.shift());
+          }
+          if(pendingFrames.length>=2)return;
+        }
         const now=performance.now();
-        if(!f.static&&f.dt>0&&wallTime)adapt((now-wallTime)/1000);
+        const elapsed=f.dt>0&&wallTime?(now-wallTime)/1000:f.dt;
+        const dt=Math.max(0,Math.min(.06,elapsed));
+        if(!f.static)adapt(elapsed);
         wallTime=now;
-        gl.bindVertexArray(vao);fillFrame(f);
+        gl.bindVertexArray(vao);fillFrame(f,dt);
         if(f.static){
           if(lastStaticSection!==f.section){
             advance(true);
@@ -693,12 +735,27 @@
         gl.bindFramebuffer(gl.FRAMEBUFFER,trailFbo[trailIndex]);gl.viewport(0,0,trailW,trailH);
         gl.useProgram(fadePaper);bind(5,history[old]);
         const distance=Number.isFinite(lastY)?Math.abs(f.y-lastY):1e9;
-        const retention=f.static?0:Math.exp(-f.dt*2.2-distance/50);
+        const retention=f.static?0:Math.exp(-dt*2.2-distance/50);
         gl.uniform1f(loc.retain,retention);gl.uniform2f(loc.fadeUV,trailW/capacityW,trailH/capacityH);gl.drawArrays(gl.TRIANGLES,0,3);
         inkPass(8,stats.dpr*stats.trailScale);
         gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.viewport(0,0,canvas.width,canvas.height);
         gl.useProgram(display);bind(5,history[trailIndex]);gl.uniform2f(loc.displayUV,trailW/capacityW,trailH/capacityH);gl.drawArrays(gl.TRIANGLES,0,3);
-        inkPass(1,stats.dpr);stats.frames++;lastY=f.y;
+        inkPass(1,stats.dpr);
+        if(leanInk&&f.final&&f.final[1]<model.h&&f.final[1]+f.final[3]>0&&f.finalP>.13&&f.finalP<.6){
+          const group=Math.ceil(stats.particles/100);
+          // Match the reference count at the point where individual letters must be legible.
+          const ramp=Math.min(1,(f.finalP-.13)/.30);
+          const extra=Math.round(((model.small?21000:56000)*.09-group*9)*ramp*ramp*(3-2*ramp));
+          if(extra>0){
+            gl.uniform1i(loc.supplement,group);gl.enable(gl.BLEND);
+            gl.drawArraysInstanced(gl.TRIANGLE_STRIP,0,4,extra);gl.disable(gl.BLEND);
+          }
+        }
+        stats.frames++;lastY=f.y;
+        if(!f.static&&f.dt>0){
+          const fence=gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE,0);
+          if(fence)pendingFrames.push(fence);
+        }
       }
       layout(initial);return {layout,draw,dispose,stats};
     }catch(error){

@@ -241,6 +241,7 @@ body:after{opacity:.034}
 .night-pin>.label{margin-top:0}
 }
 .dawn-art{position:absolute;inset:0;pointer-events:none}
+html.simulated body{background-image:none!important}
 html:not(.simulated) .dawn-art{background:url(dawn-engraving.svg) center/100% 100% no-repeat}
 html:not(.simulated) .night-water{background:url(night-engraving.svg) center/100% 100%}
 #flow{opacity:1;inset:0;width:100%;height:100%;pointer-events:none}
@@ -257,7 +258,7 @@ html:not(.simulated) #flow{visibility:hidden}
 .mat .image-wash{position:absolute;inset:26px;width:calc(100% - 52px);height:calc(100% - 52px);object-fit:contain;pointer-events:none;z-index:2}
 .underground .copy{background:transparent;box-shadow:none}
 .read-ink{display:inline-block;position:relative}
-.read-ink:before{content:attr(data-soft) / "";position:absolute;inset:0;pointer-events:none;filter:blur(3px);opacity:var(--soft,0)}
+.read-ink[data-soft]:before{content:attr(data-soft) / "";position:absolute;inset:0;pointer-events:none;filter:blur(3px);opacity:var(--soft,0)}
 p:focus-within .read-ink{opacity:1!important;transform:none!important}
 .current{background:transparent}
 .quote-ribbon{position:relative;display:block;width:100%;height:clamp(80px,10vw,142px);white-space:nowrap;font:italic 400 clamp(28px,3.1vw,44px)/1 var(--serif)}

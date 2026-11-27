@@ -72,7 +72,8 @@
   }
   function heroY(rect,x,k){
     const u=(x-rect[0])/rect[2];
-    return rect[1]+rect[3]*(k===0?.74-.42*u+.12*Math.sin(TAU*u+.6):.92-.66*u+.10*Math.sin(TAU*u-1.15));
+    const shoal=(u-.36)/.25;
+    return rect[1]+rect[3]*((k===0?.74-.42*u+.12*Math.sin(TAU*u+.6):.92-.66*u+.10*Math.sin(TAU*u-1.15))+.095*Math.exp(-shoal*shoal));
   }
   function nightY(rect,x,k,p){
     const u=(x-rect[0])/rect[2],peak=(u-.52)*2.9,converge=Math.exp(-peak*peak)*ease(0,.35,p);
@@ -147,29 +148,37 @@
     return new Float32Array(a);
   }
   window.River2D=function River2D(canvas,initial){
-    const ctx=canvas.getContext('2d',{alpha:false});
+    // Keep fallback surfaces on the CPU so an emulated GPU never has to rasterize these paths.
+    const backing={alpha:false,willReadFrequently:true};
+    const ctx=canvas.getContext('2d',backing);
     if(!ctx)return null;
-    const trails=document.createElement('canvas'),tc=trails.getContext('2d',{alpha:false});
-    const ground=document.createElement('canvas'),gc=ground.getContext('2d',{alpha:false});
+    const trails=document.createElement('canvas'),tc=trails.getContext('2d',{willReadFrequently:true});
+    const ground=document.createElement('canvas'),gc=ground.getContext('2d',backing);
     const guardPaints=new Map(),guardPad=23;
     const stats={backend:'Canvas2D',particles:0,dpr:1,trailScale:1};
     let M,w,h,dpr,small,atlas,glyphs,spine,field,cols,rows,px,py,weight,count,nightTop,nightBottom;
     let lastY=NaN,lastPaperY=NaN,surfacePaper,clock=0,frames=0,quality=1,layoutChanged=true;
-    const cell=42;
+    const cell=54;
+    function sizeCanvas(){
+      // Keep all coordinates in CSS pixels. The reading text and gilding retain their native resolution.
+      dpr=Math.min(M.dpr||1,1.25,Math.sqrt(760000*quality/(w*h)));
+      canvas.width=Math.max(1,Math.round(w*dpr));canvas.height=Math.max(1,Math.round(h*dpr));
+      ctx.setTransform(canvas.width/w,0,0,canvas.height/h,0,0);stats.dpr=dpr;
+    }
     function historyBuffer(){
-      const s=Math.min(dpr,small?1:1.15)*Math.sqrt(quality);
+      const s=Math.min(dpr,.84);
       trails.width=Math.max(1,Math.round(w*s));trails.height=Math.max(1,Math.round(h*s));
       tc.setTransform(trails.width/w,0,0,trails.height/h,0,0);
       stats.trailScale=s;lastPaperY=NaN;layoutChanged=true;
     }
     function layout(model){
-      M=model;w=Math.max(1,M.w);h=Math.max(1,M.h);small=M.small;dpr=clamp(M.dpr||1,.5,2);atlas=M.atlas;
-      canvas.width=Math.max(1,Math.round(w*dpr));canvas.height=Math.max(1,Math.round(h*dpr));ctx.setTransform(dpr,0,0,dpr,0,0);
+      M=model;w=Math.max(1,M.w);h=Math.max(1,M.h);small=M.small;atlas=M.atlas;
+      sizeCanvas();
       ground.width=Math.max(1,Math.ceil(w/2));ground.height=Math.max(1,Math.ceil(h/2));
       gc.setTransform(ground.width/w,0,0,ground.height/h,0,0);
       guardPaints.clear();surfacePaper=M.stops&&M.stops[4]>M.stops[3]?returningPaper(w,M.stops[4]-M.stops[3]):null;
       cols=Math.ceil(w/cell)+2;rows=Math.ceil(h/cell)+2;field=new Float32Array(cols*rows*3);
-      const capacity=small?1500:3400;
+      const capacity=small?850:1200;
       px=new Float32Array(capacity);py=new Float32Array(capacity);weight=new Float32Array(capacity);
       for(let i=0;i<capacity;i++){px[i]=seed(i*3)*w;py[i]=seed(i*3+1)*h;weight[i]=.6+seed(i*3+2)*.85;}
       glyphs={final:swatch(finalTargets(M)),vac:swatch(M.glyphs?.vac),titleWords:(M.glyphs?.titleWords||[]).map(swatch)};
@@ -189,7 +198,7 @@
           spine.push(ix<0?NaN:(ix+.5)*w/atlas.width);
         }
       }
-      quality=1;historyBuffer();lastY=NaN;stats.dpr=dpr;
+      historyBuffer();lastY=NaN;
     }
     function refreshPaper(f){
       if(f.y===lastPaperY)return;
@@ -215,14 +224,15 @@
             m.beginPath();m.roundRect(guardPad-radius,guardPad-radius,coreW+2*radius,coreH+2*radius,radius);m.fill();
             previous=opacity;
           }
-          cache={mask,patch,brush:patch.getContext('2d')};guardPaints.set(index,cache);
+          cache={mask,patch,brush:patch.getContext('2d',{willReadFrequently:true})};guardPaints.set(index,cache);
         }
         const x=Math.floor(r[0])-guardPad-1,y=Math.floor(r[1])-guardPad-1,b=cache.brush;
         b.globalCompositeOperation='copy';b.drawImage(cache.mask,0,0);
         b.globalCompositeOperation='source-in';b.drawImage(ground,-x,-y,w,h);
         // Restore both the fresh plate and the accumulation buffer. The shared
         // paper source includes the warm seam, even when a term crosses it.
-        ctx.drawImage(cache.patch,x,y);tc.drawImage(cache.patch,x,y);
+        ctx.drawImage(cache.patch,x,y);
+        tc.globalCompositeOperation='destination-out';tc.drawImage(cache.mask,x,y);tc.globalCompositeOperation='source-over';
       }
     }
     function localAtlas(x,y){
@@ -291,11 +301,17 @@
     function backgroundInk(f,dt,clear,jump,present=true){
       count=Math.round(px.length*quality);stats.particles=count;
       refreshPaper(f);
-      if(!clear&&Math.abs(jump)>.35){
-        tc.globalAlpha=1;tc.drawImage(trails,0,-jump,w,h);
-        tc.save();tc.beginPath();tc.rect(0,jump>0?h-jump:0,w,Math.abs(jump)+1);tc.clip();tc.drawImage(ground,0,0,w,h);tc.restore();
+      // Keep pigment on transparent paper. Repeated low-opacity redraws of an
+      // 8-bit opaque background otherwise accumulate rounding errors in dark scenes.
+      tc.globalAlpha=1;
+      if(clear)tc.clearRect(0,0,w,h);
+      else{
+        if(Math.abs(jump)>.35){
+          tc.globalCompositeOperation='copy';tc.drawImage(trails,0,-jump,w,h);
+        }
+        tc.globalCompositeOperation='destination-out';tc.globalAlpha=1-Math.exp(-dt*1.35);
+        tc.fillRect(0,0,w,h);tc.globalCompositeOperation='source-over';
       }
-      tc.globalAlpha=clear?1:1-Math.exp(-dt*1.35);tc.drawImage(ground,0,0,w,h);
       const groups=Array.from({length:8},()=>new Path2D()),colors=pickShade(f);
       const gold=clamp(f.gold,.01,.095);
       for(let i=0;i<count;i++){
@@ -315,7 +331,7 @@
         tc.globalAlpha=(clear?(i%2?.012:.095):(i%2?.0025:.017)*Math.min(2,dt*60))*(i>=6?.75:1);tc.stroke(groups[i]);
       }
       tc.globalAlpha=1;
-      if(present){ctx.globalAlpha=1;ctx.drawImage(trails,0,0,w,h);}
+      if(present){ctx.globalAlpha=1;ctx.drawImage(ground,0,0,w,h);ctx.drawImage(trails,0,0,w,h);}
     }
     function paths(colors,alpha,width,groups){
       ctx.lineCap='round';ctx.lineJoin='round';
@@ -325,7 +341,9 @@
     function yarn(f,r,fn,lanes,half,colors,alpha,lineWidth,lo=-.05,hi=1.05,confine=null){
       if(!visible(r,h,80))return;
       const groups=Array.from({length:4},()=>new Path2D());
-      const nodes=clamp(Math.ceil((hi-lo)*r[2]/(small?13:22)),12,100);
+      const detail=Math.sqrt(quality);
+      if(lanes>7)lanes=Math.max(7,Math.round(lanes*.65*detail));
+      const nodes=clamp(Math.ceil(detail*(hi-lo)*r[2]/(small?16:28)),10,72);
       const guards=(f.termGuards||[]).filter(g=>visible(g,h,50)&&g[1]<r[1]+r[3]+54&&g[1]+g[3]>r[1]-54)
         .map(g=>({g,below:fn(g[0]+g[2]*.5,0,0)>g[1]+g[3]*.5}));
       for(let j=0;j<lanes;j++){
@@ -378,11 +396,13 @@
       if(spine.length<2)return;
       const dy=M.docH/spine.length,from=clamp(Math.floor(f.y/dy)-1,0,spine.length-1),to=clamp(Math.ceil((f.y+h)/dy)+1,0,spine.length-1);
       const groups=Array.from({length:4},()=>new Path2D());
+      const banks=[f.hero,f.ford4,f.final].filter(r=>visible(r,h));
       for(let j=0;j<13;j++){
         const p=groups[j%4];let used=false,px0=0,py0=0;
         for(let i=from;i<=to;i++){
           const x=spine[i];if(!Number.isFinite(x)){used=false;continue;}
           const yy=(i+.5)*dy-f.y;
+          if(banks.some(r=>yy>=r[1]&&yy<=r[1]+r[3])){used=false;continue;}
           const displacement=(j-6)*(.81+.22*Math.sin(i*.052+f.t*.16))+.9*Math.sin(i*.17+j*.36-f.t*.35);
           const xx=x+displacement+bend(x,yy,f)*.42;
           if(!used){p.moveTo(xx,yy);used=true;}else p.quadraticCurveTo(px0,py0,(xx+px0)*.5,(yy+py0)*.5);
@@ -402,7 +422,7 @@
     }
     function glyphInk(f,g,rect,kind,phase){
       if(!g||!visible(rect,h,100))return;
-      const final=kind==='final',formation=final?ease(.16,.50,phase):ease(0,.50,phase)*(1-ease(.55,1,phase));
+      const final=kind==='final',formation=final?ease(.13,.50,phase):ease(0,.50,phase)*(1-ease(.55,1,phase));
       if(!final&&(phase<=0||phase>=1))return;
       const handoff=final?1-ease(.50,.60,phase):1;
       const blend=final?ease(.77,.997,formation):0;
@@ -482,7 +502,7 @@
       if(visible(r,h)){
         for(let k=0;k<2;k++){
           const half=(small?11:22)*(k?1.25:1);
-          yarn(f,r,x=>heroY(r,x,k),small?44:68,half,k?['#536573','#485c66','#75847f']:['#688579','#809386','#607d73'],k?.51:.49,small?.85:1);
+          yarn(f,r,x=>heroY(r,x,k),small?54:96,half,k?['#39494d','#3c5054','#60736e']:['#586f65','#73877b','#516b62'],k?.67:.60,small?.85:1);
           yarn(f,r,x=>heroY(r,x,k),small?13:22,half*1.65,['#86958a','#a1a99a'],.26,.65);
         }
         const lx=f.light?.[0]??r[0]+r[2]*.77,ly=f.light?.[1]??r[1]+r[3]*.56;
@@ -514,8 +534,10 @@
         const bottom=small?M.earthTextBottom-f.y+(f.earthHeld||0)*.58:NaN;
         const bed=x=>goldY(r,x,bottom);
         yarn(f,r,bed,7,2.5,['#a78340','#c6a663'],.65,.9);
-        const head=.055+.88*f.earthP;
-        yarn(f,r,bed,10,1.85,['#d9b879','#eed295'],.85,1,head-.18,head);
+        const head=.07+.86*f.earthP;
+        const light=ctx.createLinearGradient(r[0]+r[2]*(head-.15),0,r[0]+r[2]*(head+.15),0);
+        light.addColorStop(0,'transparent');light.addColorStop(.5,'#f8d68a');light.addColorStop(1,'transparent');
+        yarn(f,r,bed,10,1.85,[light],.85,1,head-.15,head+.15);
       }
       r=f.surface;
       if(visible(r,h)){
@@ -553,11 +575,11 @@
     function draw(frame){
       const dt=clamp(Number.isFinite(frame.dt)?frame.dt:1/60,0,.06),jump=Number.isFinite(lastY)?Math.abs(frame.y-lastY):h;
       const clear=frame.static||layoutChanged||jump>h*.36;
-      clock+=dt;frames++;
+      clock+=frame.elapsed??dt;frames++;
       if(clock>=1&&!frame.static){
         const ms=clock*1000/frames,goal=small?21:16.8;
-        const next=ms>goal*1.1?Math.max(.48,quality*.84):ms<goal*.8?Math.min(1,quality+.08):quality;
-        if(Math.abs(next-quality)>.045){quality=next;historyBuffer();}
+        const next=ms>goal*1.1?Math.max(.38,quality*.72):ms<goal*.8?Math.min(1,quality+.08):quality;
+        if(Math.abs(next-quality)>.045){quality=next;sizeCanvas();historyBuffer();}
         clock=0;frames=0;
       }
       vectors(frame);
