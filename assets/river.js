@@ -7,17 +7,20 @@
   const smooth=(a,b,x)=>{const p=clamp((x-a)/(b-a));return p*p*(3-2*p);};
   const wave=(x,y,t)=>.67*Math.cos(y*.009+t*.20+17)+.34*Math.cos(x*.005+y*.006-(t*.20+17)*.67);
   const root=document.documentElement, reduced=matchMedia('(prefers-reduced-motion: reduce)');
+  const scrollTimeline=CSS.supports('animation-timeline:scroll()');
   const terms=all('.term'),sentence=all('.sentence span'),rail=$('#tray'),earthCopy=$('#ford4 .spread');
   const reflection=$('.reflection em'),scrollCue=$('.cue'),cards=all('.mat img');
   const chips=terms.map((el,i)=>{const chip=document.createElement('span');chip.className='chip';chip.dataset.ford=i;chip.textContent=el.querySelector('.term-spelling').textContent;chip.hidden=true;rail.append(chip);return chip;});
   const nightWater=$('.night-water'),dissolvedAt=sentence.map(()=>-Infinity);
   let previousSentencePhase=null,inscriptionOpacity=-1;
   let canvas=$('#flow'),model,renderer,backend='initializing',errorMessage='';
+  const plane=document.querySelector('.river-plane');
+  let paintOrigin=0,lastDom=0,nextWater=0,lastSubmit=0,slowSubmits=0,idleTimer=0;
   let raf=0,t=0,last=0,y=scrollY,inputY=y,scrollSpeed=0;
   let readyCount=0,lastGesture=-Infinity,layoutTimer=0,building=false,deferred=false,layoutSerial=0;
   let screenWidth=innerWidth,screenHeight=innerHeight;
   let currentFrame=null,priorStaticKey='',pointer=null,visibilityEpoch=0,paintCount=0;
-  let layoutFadeStart=-10,outgoing=null,lastDirection=0,known=0,lastBand=-1,bandPhase=0;
+  let lastDirection=0,known=0,lastBand=-1,bandPhase=0;
   const impulses=[],emissions=[],arrivals=new Array(5).fill(-Infinity);
   const lastPluck=Array(7).fill(-100),revealed=new Set(),intro=new Map();
   const ns='http://www.w3.org/2000/svg';
@@ -105,7 +108,7 @@
     let active=-1;
     for(let i=0;i<m.quotes.length;i++)if(onscreen(view(m.quotes[i].box))){active=i;break;}
     if(active!==lastBand){lastBand=active;bandPhase=0;}
-    if(active>=0&&!reduced.matches)bandPhase+=dt*speedAtBand(m.quotes[active].box);
+    if(active>=0&&!m.quotes[active].native&&!reduced.matches)bandPhase+=dt*speedAtBand(m.quotes[active].box);
     for(let i=0;i<5;i++)if(y+h*.81>=m.termBoxes[i][1]&&arrivals[i]===-Infinity){
       arrivals[i]=t;known=Math.max(known,i+1);const r=m.termBoxes[i];
       const g=m.termGuards[i];
@@ -137,7 +140,7 @@
       // A reader can stop the wheel anywhere. Once a letter surfaces, retain readable ink.
       const visibleInk=a===0?0:.77+.23*a;
       piece.el.style.opacity=a===1?'':String(visibleInk);
-      piece.el.style.transform=a===1?'':'translate3d(0,'+((1-a)*10).toFixed(2)+'px,0)';
+      piece.el.style.transform=a===1?'':'translateY('+((1-a)*10).toFixed(2)+'px)';
       if(a>0&&a<1){
         if(!piece.el.dataset.soft)piece.el.dataset.soft=piece.el.textContent;
         piece.el.style.setProperty('--soft',String((1-a)*.58));
@@ -148,7 +151,7 @@
   function updateText(f,delta){
     const m=model,still=f.static;
     const foil=still?1:smooth(.5,.6,f.finalP);
-    if(foil!==inscriptionOpacity){nightWater.style.setProperty('--inscription-opacity',String(foil));inscriptionOpacity=foil;}
+    if(!scrollTimeline&&foil!==inscriptionOpacity){nightWater.style.setProperty('--inscription-opacity',String(foil));inscriptionOpacity=foil;}
     chips.forEach((chip,i)=>{if(chip.hidden!==(i>=f.ledger))chip.hidden=i>=f.ledger;});
     rail.classList.toggle('visible',y+screenHeight*.6>m.fords[0][1]&&y<m.night[1]-screenHeight*.12);
     const railY=y+(m.small?12:screenHeight*.21);
@@ -157,12 +160,12 @@
     rail.classList.toggle('down',m.small&&!still&&lastDirection>0);
     if(onscreen(f.hero)){
       const n=wave(f.hero[2]*.38,f.hero[1],still?0:t);
-      reflection.style.transform='translate3d('+(n*3).toFixed(2)+'px,'+(n*.7).toFixed(2)+'px,0) scaleY(-.64) skewX('+(n*.9).toFixed(2)+'deg)';
+      reflection.parentElement.style.transform='translate3d('+(n*3).toFixed(2)+'px,'+(n*.7).toFixed(2)+'px,0) skewX('+(n*.9).toFixed(2)+'deg)';
       const cueTravel=m.small?35:61;
       scrollCue.style.setProperty('--drop',(cueTravel*(still?.5:.5-.48*Math.cos(t*1.68))).toFixed(2)+'px');
     }
-    if(onscreen(f.ford4))earthCopy.style.transform=f.earthHeld?'translateY('+(-.42*f.earthHeld).toFixed(1)+'px)':'';
-    if(f.active>=0){
+    if(!scrollTimeline&&onscreen(f.ford4))earthCopy.style.transform=f.earthHeld?'translateY('+(-.42*f.earthHeld).toFixed(1)+'px)':'';
+    if(f.active>=0&&!m.quotes[f.active].native){
       const c=m.quotes[f.active],r=f.band;
       const distance=still?0:(y+screenHeight-c.box[1])*1.15+bandPhase;
       const bias=.24*Math.sin((still?0:t)*.2+17);
@@ -210,31 +213,34 @@
       o.img.style.transform='translateY('+((1-p)*6).toFixed(2)+'px)';
     }
   }
+  function useLayers(m){
+    if(backend==='layers')return;
+    const previous=renderer;
+    const fresh=canvas.cloneNode(false);canvas.replaceWith(fresh);canvas=fresh;
+    renderer=RiverLayers(plane,{...m,h:Math.ceil(m.h*1.15)});
+    backend='layers';root.classList.add('native-water');previous?.dispose();
+    priorStaticKey='';lastSubmit=0;slowSubmits=0;
+  }
   function installRenderer(m){
     const renderModel={...m,h:Math.ceil(m.h*1.15)};
+    earthCopy.style.setProperty('--pin-start',m.earthStage[1]+'px');
+    earthCopy.style.setProperty('--pin-end',(m.earthStage[1]+m.earthHold)+'px');
+    earthCopy.style.setProperty('--pin-lift',(-.42*m.earthHold)+'px');
+    for(const [name,p] of [['--foil-start',.5],['--foil-end',.6]]){
+      nightWater.style.setProperty(name,(m.night[1]-.58*m.h+p*(.78*m.h+m.nightHold))+'px');
+    }
     if(renderer){
-      if(currentFrame&&!reduced.matches){
-        renderer.draw({...currentFrame,dt:0,settle:0});
-        outgoing?.remove();outgoing=document.createElement('canvas');
-        outgoing.setAttribute('aria-hidden','true');outgoing.className='old-impression';
-        outgoing.width=Math.max(1,Math.round(canvas.width*.5));outgoing.height=Math.max(1,Math.round(canvas.height*.5));
-        outgoing.getContext('2d').drawImage(canvas,0,0,outgoing.width,outgoing.height);
-        outgoing.style.width=canvas.style.width;outgoing.style.height=canvas.style.height;canvas.after(outgoing);
-      }
       renderer.layout(renderModel);
     }else{
       try{renderer=window.RiverGL?.(canvas,renderModel);if(renderer){
         backend='webgl2';
         canvas.addEventListener('webglcontextlost',event=>{
-          event.preventDefault();cancelAnimationFrame(raf);raf=0;
-          const fresh=canvas.cloneNode(false);canvas.replaceWith(fresh);canvas=fresh;
-          const liveModel=model||m;
-          renderer.dispose();renderer=window.River2D(canvas,{...liveModel,h:Math.ceil(liveModel.h*1.15)});
-          backend='canvas2d';priorStaticKey='';last=0;wake();
+          event.preventDefault();if(event.currentTarget!==canvas)return;
+          useLayers(model||m);last=0;wake();
         },{once:true});
       }}
       catch(error){errorMessage=String(error);console.warn('WebGL river:',error);}
-      if(!renderer){const fresh=canvas.cloneNode(false);canvas.replaceWith(fresh);canvas=fresh;renderer=window.River2D(canvas,renderModel);backend='canvas2d';}
+      if(!renderer)useLayers(m);
     }
     canvas.style.width=m.w+'px';canvas.style.height=renderModel.h+'px';
   }
@@ -243,7 +249,7 @@
     const elapsed=last?Math.max(0,(now-last)*.001):0;last=now;
     const dt=Math.min(.06,elapsed);
     if(!reduced.matches)t+=elapsed;
-    const previousY=y;y=inputY;const delta=y-previousY;
+    const previousY=y;y=scrollY;inputY=y;const delta=y-previousY;
     scrollSpeed=mix(scrollSpeed,clamp(Math.abs(delta)/(Math.max(dt,.001)*950),0,2),1-Math.exp(-dt*8));
     if(delta&&!reduced.matches){
       for(let i=0;i<7;i++){
@@ -253,20 +259,47 @@
       const edge=model.surface[1]+model.surface[3]*.67-screenHeight*.62;
       if((previousY-edge)*(y-edge)<=0)impulse(model.w*.75,edge+screenHeight*.62,0,-1,Math.min(model.w*.28,230),1,1);
     }
-    const f=makeFrame(dt);f.elapsed=elapsed;currentFrame=f;updateText(f,delta);
+    const f=makeFrame(dt);f.elapsed=elapsed;currentFrame=f;
+    if(delta||!lastDom||now-lastDom>=1000/60||reduced.matches){
+      updateText(f,delta);lastDom=now;
+    }else if(onscreen(f.ford5)){
+      for(let i=0;i<sentence.length;i++)f.glyphBoxes[i][0]+=(model.small?23:53)*clamp((f.sentencePhase-i*.15)/.43);
+    }
     const key=[Math.round(y),readyCount,reduced.matches].join('/');
-    if(!reduced.matches||key!==priorStaticKey){
+    if((!reduced.matches||key!==priorStaticKey)&&(backend==='layers'||now+.5>=nextWater||reduced.matches||!priorStaticKey)){
       f.settle=reduced.matches?18:0;
-      renderer.draw(f);paintCount++;priorStaticKey=key;
+      if(backend==='layers'){
+        renderer.draw(f);paintCount++;
+      }else{
+        // Place a completed water frame in the scrollable document at the origin it actually drew.
+        // The compositor can then move it with the text between two GPU submissions.
+        const pad=Math.min(y,Math.round(model.h*.075)),origin=y-pad;
+        const shifted={...f,y:origin};
+        const lift=r=>[r[0],r[1]+pad,r[2],r[3]];
+        for(const name of ['hero','ford2','ford3','ford4','surface','ford5','final','band','term','timeBed'])shifted[name]=lift(f[name]);
+        shifted.termGuards=f.termGuards.map(lift);shifted.glyphBoxes=f.glyphBoxes.map(lift);
+        shifted.light=[f.light[0],f.light[1]+pad];
+        shifted.impulses=f.impulses.map(r=>[r[0],r[1]+pad,...r.slice(2)]);
+        shifted.emissions=f.emissions.map(e=>({...e,y:e.y+pad}));
+        if(renderer.draw(shifted)){
+          const gap=lastSubmit?now-lastSubmit:0;lastSubmit=now;
+          if(!f.static&&now-lastGesture<400&&gap>65&&gap<1000)slowSubmits++;
+          else slowSubmits=Math.max(0,slowSubmits-1);
+          const budget=delta?1000/90:1000/60;
+          nextWater=now+budget-Math.min(Math.max(0,now-nextWater),budget*.35);
+          if(origin!==paintOrigin)canvas.style.transform='translateY('+origin+'px)';
+          paintOrigin=origin;paintCount++;
+          if(slowSubmits>=15)useLayers(model);
+        }
+      }
+      priorStaticKey=key;
     }
-    if(outgoing){
-      const p=f.static?1:smooth(0,.28,t-layoutFadeStart);
-      outgoing.style.opacity=String(1-p);
-      if(p===1){outgoing.remove();outgoing=null;layoutFadeStart=-10;}
+    if(!reduced.matches&&y<model.night[1]+model.night[3]+50){
+      if(backend==='layers'&&!delta&&now-lastGesture>120)idleTimer=setTimeout(wake,1000/24);
+      else wake();
     }
-    if(!reduced.matches)wake();
   }
-  function wake(){if(!raf&&model&&!document.hidden)raf=requestAnimationFrame(compose);}
+  function wake(){clearTimeout(idleTimer);if(!raf&&model&&!document.hidden)raf=requestAnimationFrame(compose);}
   function queueLayout(delay=205){
     clearTimeout(layoutTimer);layoutTimer=setTimeout(prepare,Math.max(0,delay));
   }
@@ -281,7 +314,7 @@
       if(model&&performance.now()-lastGesture<200){deferred=true;return;}
       installRenderer(m);
       for(const quote of m.quotes){quote.el.replaceChildren(quote.fragments);delete quote.fragments;}
-      model=m;readyCount++;layoutFadeStart=reduced.matches?-10:t;
+      model=m;readyCount++;lastDom=0;
       priorStaticKey='';inputY=scrollY;last=0;root.classList.add('simulated');wake();
     }catch(error){errorMessage=String(error);console.error('River layout:',error);if(!model)root.classList.remove('live','simulated');}
     finally{building=false;if(deferred){deferred=false;queueLayout();}}
@@ -299,21 +332,21 @@
         impulse(x,v+inputY,dx/len,dy/len,120,clamp(len/36,.2,1.3),0);
       }
     }
-    pointer=[x,v];const r=model.strings,ratio=(v+inputY-r[1])/r[3];
+    pointer=[x,v];wake();const r=model.strings,ratio=(v+inputY-r[1])/r[3];
     const i=Math.round((ratio-.14)/.12);if(i>=0&&i<7&&Math.abs(ratio-(.14+i*.12))<.055)pluck(i,x);
   };
   addEventListener('pointermove',onPointer,{passive:true});
   document.addEventListener('pointerleave',()=>{pointer=null;});
   document.addEventListener('visibilitychange',()=>{
-    visibilityEpoch++;last=0;inputY=scrollY;y=inputY;scrollSpeed=0;
-    if(document.hidden){cancelAnimationFrame(raf);raf=0;}else wake();
+    visibilityEpoch++;last=0;lastSubmit=0;slowSubmits=0;inputY=scrollY;y=inputY;scrollSpeed=0;
+    if(document.hidden){clearTimeout(idleTimer);cancelAnimationFrame(raf);raf=0;}else wake();
   });
   reduced.addEventListener('change',()=>{priorStaticKey='';last=0;impulses.length=0;queueLayout(0);wake();});
   document.addEventListener('focusin',e=>{
     const p=e.target.closest('.copy p,.night-pin p');if(p)revealed.add(p);
   });
   Object.defineProperty(window,'riverDiagnostics',{get:()=>({
-    backend,layoutCount:readyCount,progress:currentFrame?.finalP||0,clock:t,paused:document.hidden,visibilityEpoch,paintCount,
+    backend,paintOrigin,layoutCount:readyCount,progress:currentFrame?.finalP||0,clock:t,paused:document.hidden,visibilityEpoch,paintCount,
     gpu:renderer?.stats||{},error:errorMessage,finalRect:currentFrame?.final||[],glyphBoxes:currentFrame?.glyphBoxes||[],
     termGuards:currentFrame?.termGuards||[],timeBed:currentFrame?.timeBed||[],dissolveAges:currentFrame?.dissolveAges||[],
     finalGlyphBounds:currentFrame&&model?model.finalGlyphBounds.map(b=>[b[0]+currentFrame.final[0],b[1]+currentFrame.final[1],b[2],b[3]]):[]

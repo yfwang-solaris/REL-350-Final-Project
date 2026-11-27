@@ -107,6 +107,7 @@
         uint id=uint(int(gl_FragCoord.y)*textureSize(stateTex,0).x+int(gl_FragCoord.x));
         state=vec4(hashU(id+137u),hashU(id+951u),20.,0.);
       }
+      if(!seedStatic&&story.w<.5)state.y=fract(state.y-(clock.z-lamp.w)/view.y+1.);
       vec2 p=state.xy*view.xy,doc=vec2(p.x,p.y+clock.z);
       vec2 sampleAt=clamp(doc/vec2(view.x,view.z),vec2(0.),vec2(1.));
       vec4 channel=texture(channelTex,sampleAt),rock=texture(obstacleTex,rockUV(p));
@@ -176,7 +177,8 @@
       // RGB16F stores the signed difference from local paper, with opaque alpha.
       // Multiplication here is precisely C_new = paper_now + (C_old-paper_old)*retention.
       // Untouched paper has an exactly representable zero difference at every stop.
-      vec3 prev=texture(historyTex,uv*historyUV).rgb;
+      vec2 previous=vec2(uv.x,uv.y-(clock.z-lamp.w)/view.y);
+      vec3 prev=previous.y<0.||previous.y>1.?vec3(0.):texture(historyTex,previous*historyUV).rgb;
       float quiet=smoothstep(.07,.86,texture(obstacleTex,rockUV(vec2(uv.x*view.x,canvasY))).r);
       color=vec4(prev*retention*mix(1.,.30,quiet)*markClearance(vec2(uv.x*view.x,canvasY)),1.);
     }
@@ -512,6 +514,7 @@
     const info=gl.getExtension('WEBGL_debug_renderer_info');
     const rendererName=gl.getParameter(info?info.UNMASKED_RENDERER_WEBGL:gl.RENDERER);
     let leanInk=/swiftshader|llvmpipe|softpipe|software rasterizer|microsoft basic render/i.test(rendererName);
+    if(leanInk){gl.getExtension('WEBGL_lose_context')?.loseContext();return null;}
     const programs=[],textures=[],buffers=[],framebuffers=[];
     let vao,ubo,model,disposed=false;
     const pendingFrames=[];
@@ -708,7 +711,7 @@
         gl.drawArraysInstanced(gl.TRIANGLE_STRIP,0,4,Math.floor(stats.particles/stride));gl.disable(gl.BLEND);
       }
       function draw(f){
-        if(disposed||gl.isContextLost())return;
+        if(disposed||gl.isContextLost())return false;
         // Do not queue stale scroll positions behind a busy GPU. The next free frame uses the current position.
         if(!f.static&&f.dt>0){
           while(pendingFrames.length){
@@ -716,7 +719,7 @@
             if(status===gl.TIMEOUT_EXPIRED)break;
             gl.deleteSync(pendingFrames.shift());
           }
-          if(pendingFrames.length>=2)return;
+          if(pendingFrames.length>=1)return false;
         }
         const now=performance.now();
         const elapsed=f.dt>0&&wallTime?(now-wallTime)/1000:f.dt;
@@ -756,6 +759,7 @@
           const fence=gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE,0);
           if(fence)pendingFrames.push(fence);
         }
+        return true;
       }
       layout(initial);return {layout,draw,dispose,stats};
     }catch(error){

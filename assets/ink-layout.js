@@ -7,6 +7,7 @@ window.RiverLayout = (() => {
   const context=document.createElement('canvas').getContext('2d',{willReadFrequently:true});
   const font=css=>[css.fontStyle,css.fontWeight,css.fontSize,css.fontFamily].join(' ');
   const paragraphWords=new Map();
+  const quoteTextures=new WeakMap();
   const quoteText=new Map(all('.quote-ribbon').map(n=>[n,n.textContent]));
   const svgNS='http://www.w3.org/2000/svg';
 
@@ -112,6 +113,39 @@ window.RiverLayout = (() => {
     const widths=parts.map(word=>context.measureText(word).width);
     const period=widths.reduce((a,b)=>a+b,0),repeats=Math.ceil(w/period)+2;
     const fragments=document.createDocumentFragment(),tokens=[];let x=0;
+    if(!matchMedia('(prefers-reduced-motion: reduce)').matches&&CSS.supports('animation-timeline: view()')){
+      const fontSize=parseFloat(getComputedStyle(el).fontSize),height=el.offsetHeight;
+      const cycles=Math.max(1,Math.round(period/w)),freq=cycles*2*Math.PI/period;
+      const tile=document.createElement('canvas'),scale=Math.min(1.5,devicePixelRatio,6000/period);
+      tile.width=Math.ceil(period*scale);tile.height=Math.ceil(height*scale);
+      const pen=tile.getContext('2d');pen.scale(tile.width/period,tile.height/height);
+      pen.font=context.font;pen.fillStyle=getComputedStyle(el).color;
+      // Draw a whole repeated phrase once. Its two ends share a tangent.
+      for(let pass=-1;pass<=1;pass++){
+        let at=pass*period;
+        for(let i=0;i<parts.length;i++){
+          if(at+widths[i]>-4&&at<period+4){
+            pen.save();pen.translate(at,height*(.55+.115*Math.sin(at*freq))-.08*fontSize);
+            pen.rotate(Math.atan(height*.115*freq*Math.cos(at*freq)));pen.fillText(parts[i],0,0);pen.restore();
+          }
+          at+=widths[i];
+        }
+      }
+      const slide=document.createElement('span'),tide=document.createElement('span');
+      slide.className='ribbon-scroll';tide.className='ribbon-tide';
+      slide.style.setProperty('--travel',(innerHeight+el.parentElement.offsetHeight)*1.15+'px');
+      slide.style.setProperty('--period',period+'px');tide.style.animationDuration=period/26+'s';
+      const prior=quoteTextures.get(el);
+      if(prior?.url)URL.revokeObjectURL(prior.url);
+      const texture={};quoteTextures.set(el,texture);
+      tile.toBlob(blob=>{
+        if(!blob||quoteTextures.get(el)!==texture)return;
+        texture.url=URL.createObjectURL(blob);
+        tide.style.backgroundImage='url('+texture.url+')';
+      });tide.style.backgroundSize=period+'px 100%';
+      slide.append(tide);fragments.append(slide);
+      return {el,fragments,box:rect(el),period,tokens,fontSize,native:true};
+    }
     for(let k=0;k<repeats;k++)for(let i=0;i<parts.length;i++){
       const token=document.createElement('span');token.className='ink-token';token.textContent=parts[i];fragments.append(token);
       tokens.push({el:token,x,width:widths[i]});x+=widths[i];

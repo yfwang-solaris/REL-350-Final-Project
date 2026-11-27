@@ -147,10 +147,10 @@
     for(let y=0;y<height;y++)for(let x=0;x<width;x++)if(p[(y*width+x)*4+3]>76)a.push(x+.5,y+.5);
     return new Float32Array(a);
   }
-  window.River2D=function River2D(canvas,initial){
+  window.River2D=function River2D(canvas,initial,regional=false){
     // Keep fallback surfaces on the CPU so an emulated GPU never has to rasterize these paths.
     const backing={alpha:false,willReadFrequently:true};
-    const ctx=canvas.getContext('2d',backing);
+    let ctx=canvas.getContext('2d',backing);
     if(!ctx)return null;
     const trails=document.createElement('canvas'),tc=trails.getContext('2d',{willReadFrequently:true});
     const ground=document.createElement('canvas'),gc=ground.getContext('2d',backing);
@@ -159,6 +159,8 @@
     let M,w,h,dpr,small,atlas,glyphs,spine,field,cols,rows,px,py,weight,count,nightTop,nightBottom;
     let lastY=NaN,lastPaperY=NaN,surfacePaper,clock=0,frames=0,quality=1,layoutChanged=true;
     const cell=54;
+    const empty=[0,-1e6,0,0];
+    let vectorFrame=null;
     function sizeCanvas(){
       // Keep all coordinates in CSS pixels. The reading text and gilding retain their native resolution.
       dpr=Math.min(M.dpr||1,1.25,Math.sqrt(760000*quality/(w*h)));
@@ -173,7 +175,7 @@
     }
     function layout(model){
       M=model;w=Math.max(1,M.w);h=Math.max(1,M.h);small=M.small;atlas=M.atlas;
-      sizeCanvas();
+      if(!regional)sizeCanvas();
       ground.width=Math.max(1,Math.ceil(w/2));ground.height=Math.max(1,Math.ceil(h/2));
       gc.setTransform(ground.width/w,0,0,ground.height/h,0,0);
       guardPaints.clear();surfacePaper=M.stops&&M.stops[4]>M.stops[3]?returningPaper(w,M.stops[4]-M.stops[3]):null;
@@ -198,7 +200,7 @@
           spine.push(ix<0?NaN:(ix+.5)*w/atlas.width);
         }
       }
-      historyBuffer();lastY=NaN;
+      if(!regional)historyBuffer();lastY=NaN;
     }
     function refreshPaper(f){
       if(f.y===lastPaperY)return;
@@ -497,7 +499,7 @@
       }
       ctx.globalAlpha=1;
     }
-    function reaches(f){
+    function reaches(f,part){
       let r=f.hero;
       if(visible(r,h)){
         for(let k=0;k<2;k++){
@@ -511,7 +513,7 @@
         const center=x=>(heroY(r,x,0)+heroY(r,x,1))*.5;
         yarn(f,r,center,5,2.5,[goldLight],.52,.85,(lx-r[0]-radius)/r[2],(lx-r[0]+radius)/r[2]);
       }
-      channel(f);
+      if(!part)channel(f);
       if(visible(f.band,h))yarn(f,f.band,x=>bandY(f.band,x,f.t),16,small?5:8,pickShade(f),.25,.7);
       r=f.ford2;
       if(visible(r,h))for(let i=0;i<7;i++)yarn(f,r,x=>stringY(r,x,i,f.plucks?.[i]??20),3,.85,ink.day,.55,.8);
@@ -527,10 +529,11 @@
       }
       r=f.ford4;
       if(visible(r,h)){
-        for(let i=0;i<17;i++){
+        if(part!=='vein')for(let i=0;i<17;i++){
           const level=(i+.5)/17;
           yarn(f,r,x=>r[1]+r[3]*(level+.013*Math.sin(x*.005+level*9-f.t*.028)+.007*Math.sin(x*.015-level*3)),2,.8,ink.earth,.17,.75);
         }
+        if(part==='sediment')return;
         const bottom=small?M.earthTextBottom-f.y+(f.earthHeld||0)*.58:NaN;
         const bed=x=>goldY(r,x,bottom);
         yarn(f,r,bed,7,2.5,['#a78340','#c6a663'],.65,.9);
@@ -554,7 +557,7 @@
           yarn(f,r,x=>timeY(r,x)+side*r[3]*.082*Math.sin((x-r[0])/r[2]*TAU+.3),5,.95,ink.day,.34,.65);
         }
       }
-      passingWords(f);
+      if(!part||part==='words')passingWords(f);
       r=f.final;
       if(visible(r,h,100)){
         for(let k=0;k<2;k++){
@@ -570,7 +573,7 @@
         }
         glyphInk(f,glyphs.final,r,'final',f.static?1:f.finalP);
       }
-      sources(f);
+      if(!part||part==='events')sources(f);
     }
     function draw(frame){
       const dt=clamp(Number.isFinite(frame.dt)?frame.dt:1/60,0,.06),jump=Number.isFinite(lastY)?Math.abs(frame.y-lastY):h;
@@ -595,7 +598,28 @@
       lastY=frame.y;layoutChanged=false;
     }
     function dispose(){trails.width=1;trails.height=1;glyphs=null;spine=null;field=null;px=null;py=null;weight=null;}
+    function paintRegion(target,frame,key,box){
+      ctx=target.getContext('2d',{willReadFrequently:true});
+      ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,target.width,target.height);
+      const sx=target.width/box[2],sy=target.height/box[3];
+      ctx.setTransform(sx,0,0,sy,-box[0]*sx,-box[1]*sy);
+      const f={...frame,hero:empty,ford2:empty,ford3:empty,ford4:empty,final:empty,band:empty,term:empty,timeBed:empty,surface:empty};
+      const fieldName=key==='vein'||key==='sediment'?'ford4':key;
+      if(fieldName in frame)f[fieldName]=frame[fieldName];
+      if(key==='seam'){
+        if(surfacePaper)ctx.drawImage(surfacePaper,...box);
+      }else{
+        if(vectorFrame!==frame){vectors(frame);vectorFrame=frame;}
+        reaches(f,key);
+        ctx.globalCompositeOperation='destination-out';ctx.fillStyle='#000';
+        for(const r of frame.termGuards||[]){
+          if(r[0]+r[2]<box[0]||r[0]>box[0]+box[2]||r[1]+r[3]<box[1]||r[1]>box[1]+box[3])continue;
+          ctx.beginPath();ctx.roundRect(r[0]-5,r[1]-5,r[2]+10,r[3]+10,5);ctx.fill();
+        }
+        ctx.globalCompositeOperation='source-over';
+      }
+    }
     layout(initial);
-    return {layout,draw,dispose,stats};
+    return {layout,draw,paintRegion,dispose,stats};
   };
 })();

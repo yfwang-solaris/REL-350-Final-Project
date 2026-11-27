@@ -241,7 +241,7 @@ body:after{opacity:.034}
 .night-pin>.label{margin-top:0}
 }
 .dawn-art{position:absolute;inset:0;pointer-events:none}
-html.simulated body{background-image:none!important}
+
 html:not(.simulated) .dawn-art{background:url(dawn-engraving.svg) center/100% 100% no-repeat}
 html:not(.simulated) .night-water{background:url(night-engraving.svg) center/100% 100%}
 #flow{opacity:1;inset:0;width:100%;height:100%;pointer-events:none}
@@ -284,3 +284,58 @@ p:focus-within .read-ink{opacity:1!important;transform:none!important}
 .final-gilt{display:none;pointer-events:none;user-select:none}
 .simulated .final-gilt{display:block;position:absolute;inset:0;width:100%;height:100%;overflow:visible;opacity:var(--inscription-opacity,0)}
 @media(forced-colors:active){.term-art text{fill:CanvasText}.simulated .final-gilt{display:none}}
+
+/* Both plates and live frames share the native scroll coordinate system. */
+body{position:relative}
+.river-plane{position:absolute;inset:0;overflow:clip;pointer-events:none;z-index:0}
+.river-plane #flow{position:absolute;inset:0 auto auto 0;will-change:transform}
+.native-water #flow{display:none}
+.native-water .dawn-art{background:url(dawn-wide.webp) center/100% 100% no-repeat}
+@media(max-width:760px){.native-water .dawn-art{background-image:url(dawn-mobile.webp)}}
+
+.native-water .night-water,.native-water .earth-pin{isolation:isolate}
+.river-region,.river-spine{position:absolute;pointer-events:none}
+.earth-pin>.river-region,.night-water>.river-region{z-index:-1}
+.river-spine{left:0;width:100%;fill:none;stroke:#68796f;stroke-width:.72;stroke-opacity:.19}
+.native-water body:after{display:none}
+.native-water .river-plane{background-image:url(grain-faint.png)}
+
+.native-water body{background-image:none!important}
+.river-tone{position:absolute;left:0;width:100%;pointer-events:none;background-repeat:no-repeat}
+.native-water .river-plane{background-image:none}
+.native-water .river-tone:after{content:"";position:absolute;inset:0;background:url(grain-faint.png)}
+.current{view-timeline-name:--quote-pass;view-timeline-axis:block;view-timeline-inset:0}
+.ribbon-scroll,.ribbon-tide{position:absolute;left:0;top:0;height:100%;pointer-events:none}
+.ribbon-scroll{width:calc(100% + var(--travel));animation:ribbon-pass linear both;animation-timeline:--quote-pass}
+.ribbon-tide{width:calc(100% + var(--period));background-repeat:repeat-x;animation:ribbon-tide linear infinite}
+@keyframes ribbon-pass{from{transform:translateX(calc(-1 * var(--travel)))}to{transform:translateX(0)}}
+@keyframes ribbon-tide{from{transform:translateX(calc(-1 * var(--period)))}to{transform:translateX(0)}}
+.native-water .reflection em{will-change:transform}
+.native-water .read-ink[data-soft]:before{content:none}
+
+.river-glint{position:absolute;left:0;top:0;width:80px;height:3px;background:linear-gradient(90deg,transparent,#b89651 45%,#cfb46b 65%,transparent);border-radius:70%;will-change:transform;pointer-events:none}
+@supports(animation-timeline:scroll()){
+  .live .earth-stage.hold .spread{animation:earth-reading linear both;animation-timeline:scroll(root block);animation-range:var(--pin-start) var(--pin-end)}
+  .simulated .final-gilt{animation:river-inscription cubic-bezier(.33333,0,.66667,1) both;animation-timeline:scroll(root block);animation-range:var(--foil-start) var(--foil-end)}
+  @keyframes earth-reading{from{transform:translateY(0)}to{transform:translateY(var(--pin-lift))}}
+  @keyframes river-inscription{from{opacity:0}to{opacity:1}}
+  @media(prefers-reduced-motion:reduce){.simulated .final-gilt{animation:none;opacity:1}}
+}
+
+.night-film{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:-1;contain:strict}
+.night-film img{position:absolute;top:0;left:0;max-width:none;will-change:transform,opacity}
+.native-water .river-region{contain:strict}
+.native-water .reflection{will-change:transform}
+
+.night-sparks{position:absolute;inset:0;width:100%;height:100%;fill:#edcf8d;animation:river-inscription linear both;animation-timeline:scroll(root block);animation-range:var(--foil-start) var(--foil-end)}
+.night-sparks g{animation:river-spark 3s ease-in-out infinite alternate}
+@keyframes river-spark{from{opacity:.16;transform:translate(-1px,1px)}to{opacity:.52;transform:translate(2px,-1px)}}
+
+.reflection-plate{position:absolute;inset:0;width:100%;height:100%}
+.native-water .reflection{mask-image:none}
+.native-water .reflection em{visibility:hidden;filter:none;will-change:auto}
+.native-water #tray{visibility:hidden}
+.native-water #tray.visible{visibility:visible}
+.native-water #tray:before{filter:none;box-shadow:0 0 7px 5px var(--mist);inset:-12px -7px -12px -2px}
+.native-water #tray.dark:before{box-shadow:0 0 7px 5px var(--earth)}
+.region-active{will-change:transform}
